@@ -19,6 +19,10 @@ struct SessionDetailView: View {
         store.pendingApproval(in: sessionId)
     }
 
+    private var question: TranscriptEvent? {
+        store.pendingQuestion(in: sessionId)
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -27,6 +31,9 @@ struct SessionDetailView: View {
 
                     if let approval {
                         ApprovalCard(event: approval, sessionId: sessionId)
+                    }
+                    if let question {
+                        QuestionCard(event: question, sessionId: sessionId)
                     }
 
                     ForEach(events) { event in
@@ -102,46 +109,173 @@ struct SessionDetailView: View {
 }
 
 /// Prominent allow/deny card — the reason this app exists.
+/// ZCode sends the exact options for each request (e.g. "Allow once",
+/// "Allow always", "Deny"), so those become the buttons.
 struct ApprovalCard: View {
     let event: TranscriptEvent
     let sessionId: String
 
     @EnvironmentObject private var store: SessionStore
 
+    private var options: [PermissionOption] { event.options ?? [] }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
                 Text("Permission needed").font(.system(size: 13, weight: .bold))
+                Spacer()
+                if let risk = event.riskLevel, !risk.isEmpty {
+                    Text(risk)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(riskColor(risk).opacity(0.25)))
+                        .foregroundStyle(riskColor(risk))
+                }
             }
             Text(event.tool ?? "tool")
                 .font(.system(size: 13, weight: .semibold))
-            if let summary = event.detail ?? event.message, !summary.isEmpty {
-                Text(summary)
+            if !detailText.isEmpty {
+                Text(detailText)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
             }
-            HStack(spacing: 6) {
-                Button {
-                    store.respond(allow: true, sessionId: sessionId, requestId: event.requestId ?? "")
-                } label: {
-                    Label("Allow", systemImage: "checkmark").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
 
-                Button {
-                    store.respond(allow: false, sessionId: sessionId, requestId: event.requestId ?? "")
-                } label: {
-                    Label("Deny", systemImage: "xmark").frame(maxWidth: .infinity)
+            if options.isEmpty {
+                HStack(spacing: 6) {
+                    decisionButton(title: "Allow", symbol: "checkmark", allow: true, tint: .green, optionId: nil)
+                    decisionButton(title: "Deny", symbol: "xmark", allow: false, tint: .red, optionId: nil)
                 }
-                .buttonStyle(.bordered)
-                .tint(.red)
+            } else {
+                ForEach(options) { option in
+                    Button {
+                        store.respond(
+                            allow: isAllow(option),
+                            sessionId: sessionId,
+                            requestId: event.requestId ?? "",
+                            optionId: option.id
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(option.name.isEmpty ? option.id : option.name)
+                                .font(.system(size: 13, weight: .semibold))
+                            if !option.description.isEmpty {
+                                Text(option.description)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isAllow(option) ? .green : .red)
+                }
             }
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(.orange.opacity(0.15)))
+    }
+
+    private func decisionButton(title: String, symbol: String, allow: Bool, tint: Color, optionId: String?) -> some View {
+        Button {
+            store.respond(allow: allow, sessionId: sessionId, requestId: event.requestId ?? "", optionId: optionId)
+        } label: {
+            Label(title, systemImage: symbol).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
+    }
+
+    private func isAllow(_ option: PermissionOption) -> Bool {
+        let id = option.id.lowercased()
+        if id.contains("deny") || id.contains("reject") || id.contains("cancel") { return false }
+        return id.contains("allow") || id.contains("accept") || id.contains("approve") || id.contains("yes")
+    }
+
+    private var detailText: String {
+        if let s = event.summary, !s.isEmpty { return s }
+        return event.detail ?? ""
+    }
+
+    private func riskColor(_ risk: String) -> Color {
+        switch risk.lowercased() {
+        case "critical", "high": return .red
+        case "medium": return .orange
+        default: return .green
+        }
+    }
+}
+
+/// The agent asked a question (AskUserQuestion). Answer with a tap, or type
+/// something of your own.
+struct QuestionCard: View {
+    let event: TranscriptEvent
+    let sessionId: String
+
+    @EnvironmentObject private var store: SessionStore
+    @State private var typed: String = ""
+
+    private var questions: [PendingQuestion] { event.questions ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "questionmark.bubble.fill").foregroundStyle(.blue)
+                Text("Question").font(.system(size: 13, weight: .bold))
+            }
+            if !(event.prompt ?? "").isEmpty {
+                Text(event.prompt ?? "")
+                    .font(.system(size: 12))
+                    .lineLimit(4)
+            }
+
+            ForEach(Array(questions.enumerated()), id: \.offset) { _, q in
+                if !q.question.isEmpty {
+                    Text(q.question)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                ForEach(Array(q.options.enumerated()), id: \.offset) { _, option in
+                    Button {
+                        store.answer(option.label, sessionId: sessionId, requestId: event.requestId ?? "")
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(option.label).font(.system(size: 13, weight: .semibold))
+                            if !option.description.isEmpty {
+                                Text(option.description)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("Your answer", text: $typed)
+                Button {
+                    let value = typed
+                    typed = ""
+                    store.answer(value, sessionId: sessionId, requestId: event.requestId ?? "")
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Button("Dismiss") {
+                store.dismissQuestion(sessionId: sessionId, requestId: event.requestId ?? "")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.blue.opacity(0.15)))
     }
 }
 
@@ -152,7 +286,7 @@ struct ModePickerView: View {
     @EnvironmentObject private var store: SessionStore
     @Environment(\.dismiss) private var dismiss
 
-    private let modes = ["plan", "build", "edit", "yolo"]
+    private let modes = ["plan", "build", "edit", "yolo", "auto"]
 
     var body: some View {
         ScrollView {
@@ -171,7 +305,7 @@ struct ModePickerView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text("plan: read-only · build: ask before changes · edit: auto-apply edits · yolo: no prompts")
+                Text("plan: read-only · build: ask first · edit: auto-apply · yolo: never ask · auto: server decides")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }

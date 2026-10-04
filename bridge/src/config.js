@@ -50,6 +50,13 @@ export function loadConfig(argv = process.argv.slice(2)) {
     // Directories the watch is allowed to open new sessions in. Empty -> cwd.
     allowedProjects: stored.allowedProjects ?? [],
     maxSessions: stored.maxSessions ?? 8,
+    // Tool approvals block the agent until answered. If no watch is attached,
+    // or nobody answers in time, the bridge applies this fallback:
+    //   deny  — safe default: refuse and tell the agent why
+    //   allow — unattended runs keep going without a human
+    //   wait  — never answer automatically (the desktop app / terminal may)
+    permissionFallback: stored.permissionFallback ?? 'deny',
+    permissionTimeoutMs: stored.permissionTimeoutMs ?? 300000,
     // Forward unrecognized session/event payloads to a debug file for protocol iteration
     debugEvents: stored.debugEvents ?? false,
     configFile: file,

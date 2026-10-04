@@ -1,7 +1,7 @@
 # HANDOFF — ZCode Remote for Apple Watch
 
 > Status snapshot for whoever picks this up next (human or agent).
-> Last updated: 2026-10-04 (session 1 — feature-complete first cut).
+> Last updated: 2026-10-04 (session 2 — rewritten against the real protocol).
 
 ## What this project is
 
@@ -10,7 +10,7 @@ sessions running on your computer. Two halves plus tooling:
 
 | Part | Path | Language | State |
 |---|---|---|---|
-| Bridge (runs on the PC) | `bridge/` | Node.js, **zero dependencies** | ✅ implemented, 34/34 e2e tests pass, verified against a real ZCode install |
+| Bridge (runs on the PC) | `bridge/` | Node.js, **zero dependencies** | ✅ implemented against the real protocol, 46/46 e2e tests pass, verified against a real ZCode install |
 | Watch app (watchOS) | `watch/` | SwiftUI (11 files) | ⚠️ source complete, Xcode project + icon generated, **never compiled** (no macOS available) |
 | Tooling | `tools/` | Node.js | ✅ icon generator, pbxproj checker, Swift sanity checker — all wired into CI |
 | Docs | `README.md`, `README.zh-CN.md`, `docs/protocol.md`, `HANDOFF.md` | — | ✅ |
@@ -53,36 +53,75 @@ Gotchas that cost time:
    inside `session/send`'s `content`. The bridge tries three upstream shapes.
 5. Ignore `startup/storageState` and `process/resourceSample` notifications.
 
+## What changed in session 2 (the big correction)
+
+Session 1 guessed the shape of ZCode's event stream and the approval path. Both
+were wrong. Session 2 read the **real** data offline — the CLI's session database
+(`~/.zcode/cli/db/db.sqlite`, opened read-only with Node 24's built-in
+`node:sqlite`) plus the protocol code inside `zcode.cjs` — and rewrote the bridge
+against it:
+
+| Session 1 (guessed) | Reality |
+|---|---|
+| events live in `params.event` / `params.items` | envelope is `{sessionId, seq, type, payload, deliveryKind, eventId, turnId, timestamp}` |
+| event types like `text`, `tool`, `result` | `part.upserted`, `model.streaming`, `tool.updated`, `turn.completed`, `permission.requested`, `userInput.*`, `session.*` |
+| approvals appear in the event stream | approvals are a **reverse request** (`interaction/requestPermission`) that the agent blocks on |
+| approvals answered via `session/send` with `tool-approval-response` items | answered by replying to that request: `{decision: "allow"\|"deny"\|"modify"\|"escalate", reason?, modifiedInput?, resolvedAt}` |
+
+Consequences now implemented:
+
+- `_classify()` matches real event types; `part.upserted` carries the same part
+  objects the CLI persists (`{type:'tool', callID, tool, state:{status, title, output, error}}`).
+- Assistant text streams through `model.streaming` deltas, accumulated into one
+  growing bubble (`streaming: true` tells the watch to replace, not append).
+- Permission cards carry the **options ZCode itself offers** ("Allow once",
+  "Deny", …). Tapping one relays ZCode's own prepared `options[].response`
+  verbatim, so the bridge cannot drift from the server's expectations.
+- `AskUserQuestion` / `ExitPlanMode` are handled too: the watch shows the
+  question with its choices and answers with
+  `{decision:"modify", modifiedInput:{...input, answers:{"<question>":"<label>"}}}`.
+- **Fallback policy**: if nobody is wearing the watch (or nobody taps in
+  `permissionTimeoutMs`, default 5 min) the bridge applies `permissionFallback`
+  — `deny` by default, `allow` for unattended runs, `wait` to defer to the
+  desktop app. A blocked agent can no longer hang forever.
+- Mode list now includes `auto`.
+
+`docs/protocol.md` documents all of this, including payload schemas extracted
+from the CLI.
+
 ## Verified by testing
 
-- **34/34** assertions in `bridge/test/e2e.mjs` (mock app-server): pairing, PIN
-  lockout, auth, session list, create, prompt streaming, tool start/done mapping,
-  turn result, approval round-trip, interrupt, mode switch, token reconnect,
-  transcript replay, HTTP hook push, cross-process takeover, bad-token rejection.
+- **46/46** assertions in `bridge/test/e2e.mjs` (mock app-server that speaks the
+  real shapes and blocks on real reverse requests): pairing, PIN lockout, auth,
+  session list/create/read, **real event envelope → wire events** (streaming
+  accumulation, part.upserted text, tool start/done with title+callId,
+  turn.completed `response`), **approval round-trip with options (allow and deny
+  paths, unique request ids)**, **AskUserQuestion round-trip** (answer lands in
+  `modifiedInput.answers`), placeholder→rich card replacement, interrupt, `auto`
+  mode, reconnect + transcript replay, hook push, cross-process takeover,
+  bad-token rejection, and **fallback auto-deny with no watch attached**.
 - **Real-CLI smoke test**: bridge + `F:/zcode/resources/glm/zcode.cjs` →
-  `appServer: "up"` and 7 real sessions listed with correct titles/projects.
-- `tools/check-pbxproj.mjs` (41 objects, all references resolve, every Swift file
-  in the Sources phase) and `tools/check-swift.mjs` (11 files structurally sound).
+  `appServer: "up"`, 10 real sessions listed with correct titles/projects.
+- `tools/check-pbxproj.mjs`, `tools/check-swift.mjs`, icon generator: all clean.
 
-## Unverified — the next person's first job
+## Still unverified — the next person's first job
 
-1. **Compile the watch app.** It has never seen a Swift compiler. Expect a
-   handful of nits (most likely: `@MainActor` isolation around `App.init`,
-   `URLSessionWebSocketTask.CloseCode` comparisons, and `@AppStorage` + `didSet`
-   combinations). CI's `watchos-build` job runs `xcodebuild` on macOS and will
-   tell you exactly what to fix:
+1. **Compile the watch app.** Still never seen a Swift compiler (no macOS here).
+   The CI `watchos-build` job runs `xcodebuild` for you:
    `xcodebuild build -project watch/ZCodeRemote.xcodeproj -scheme ZCodeRemote -destination 'generic/platform=watchOS' CODE_SIGNING_ALLOWED=NO`
-2. **One real turn with `debugEvents: true`.** The exact live `session/event`
-   payload shape is unknown (sandbox had no network; cross-process subscription is
-   refused). Run a turn, then read `~/.zcode-watch-remote/events-debug.jsonl` and
-   tighten `_classifyEvent()` in `bridge/src/hub.js` — it is deliberately tolerant
-   today and may under-report.
-3. **Confirm the live approval trigger.** Default mode is `build`, which should
-   prompt for risky tools. If approvals never reach the watch, try
-   `deliveryKind: "desktop-continuous"` in `_ensureSubscribed()`.
-4. **Real-hardware latency/keepalive**: the bridge pings every 25 s and drops a
-   client after 2 missed pongs; watchOS suspends background apps, so expect
-   reconnect-on-wrist-raise behaviour to need tuning.
+2. **One live turn with `debugEvents: true`.** The sandbox has no network, so no
+   real model turn has ever run through the bridge. Shapes are now taken from the
+   real protocol, but confirm on hardware: `part.upserted` ordering, whether
+   `model.streaming` deltas also arrive as `part.delta`, and whether the CLI
+   really routes `interaction/requestPermission` to a remote
+   `web-remote-replayable` subscriber while the desktop app is attached.
+   If approvals never reach the watch, try `deliveryKind: "desktop-continuous"`
+   in `_ensureSubscribed()`.
+3. **Two-client question**: if the desktop app and the bridge are both attached,
+   confirm who answers an interaction request (the protocol has `ownerClientId` /
+   `ownerDeviceLabel` concepts). The fallback policy makes the failure mode safe.
+4. **watchOS background suspension**: the bridge pings every 25 s and drops a
+   client after 2 missed pongs. Expect reconnect-on-wrist-raise tuning.
 
 ## House rules already baked in
 

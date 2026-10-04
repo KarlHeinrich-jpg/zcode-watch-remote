@@ -21,7 +21,10 @@ back to your desk.
 - **See every session** — the desktop app's sessions *and* ones you start from
   the watch, with live status (`idle` / `running` / `approval`).
 - **Tap to approve** — when the agent wants to run a risky tool, the watch buzzes
-  and shows Allow / Deny. No more guessing whether it's still waiting.
+  and shows the *same options ZCode offers* ("Allow once", "Deny", …). No more
+  guessing whether it's still waiting.
+- **Answer the agent's questions** — AskUserQuestion prompts appear on the watch
+  with their choices; tap one or dictate your own answer.
 - **Dictate prompts** — watchOS dictation and Scribble, straight into the session.
 - **Stop anything** — interrupt a runaway turn from your wrist.
 - **Switch permission mode** — `plan` / `build` / `edit` / `yolo` per session.
@@ -114,6 +117,8 @@ same machine as the bridge matters — `127.0.0.1` is only right if it does.
 | `mode` | `build` | Permission mode for sessions created from the watch |
 | `allowedProjects` | `[]` | Projects the watch may start sessions in. **Empty means "no new sessions from the watch"** — add paths to enable the + button |
 | `maxSessions` | `8` | Cap on simultaneously running sessions |
+| `permissionFallback` | `deny` | What to do when the agent asks for permission but nobody is wearing the watch: `deny` (safe), `allow` (unattended runs), `wait` (leave it to the desktop app) |
+| `permissionTimeoutMs` | `300000` | How long to wait for a tap before applying the fallback |
 | `debugEvents` | `false` | Append every raw ZCode event to `events-debug.jsonl` (for protocol debugging) |
 
 Flags: `--port N`, `--config path`, `--reset-pin`, `--help`.
@@ -134,9 +139,9 @@ Flags: `--port N`, `--config path`, `--reset-pin`, `--help`.
 
 | Component | State |
 |---|---|
-| Bridge | ✅ Implemented, 34/34 end-to-end tests pass (`cd bridge && node test/e2e.mjs`), verified against a real ZCode install (lists real sessions, spawns the real `app-server`) |
+| Bridge | ✅ Implemented against the **real** ZCode protocol (reverse-engineered event envelope, interaction requests), 46/46 end-to-end tests pass (`cd bridge && node test/e2e.mjs`), verified against a real ZCode install (lists real sessions, drives the real `app-server`) |
 | Watch app | ⚠️ Source complete (11 Swift files, Xcode project, icon), **not yet compiled** — no macOS in the environment where it was written. Expect to fix a small number of compiler nits on first build. |
-| Approval relay | ⚠️ Verified end-to-end against a protocol mock; the exact live approval payload may need the fallback ladder tuned (see `HANDOFF.md`) |
+| Approvals & questions | ✅ Round-trip verified against a mock that speaks the real protocol (options, decisions, `modifiedInput.answers`, and the no-watch fallback). ⚠️ Not yet observed on a live turn — see `HANDOFF.md` |
 
 ## Troubleshooting
 

@@ -122,8 +122,7 @@ final class SessionStore: ObservableObject {
             unread.remove(id)
 
         case .sessionEvent(let id, let event):
-            transcripts[id, default: []].append(event)
-            if transcripts[id]!.count > 200 { transcripts[id]!.removeFirst(transcripts[id]!.count - 200) }
+            append(event, to: id)
             if currentSessionId != id {
                 unread.insert(id)
             }
@@ -134,6 +133,9 @@ final class SessionStore: ObservableObject {
 
         case .permissionAccepted:
             Haptics.turnFinished(success: true)
+
+        case .inputAccepted:
+            Haptics.tap()
 
         case .externalEvent(let event, let message, let project):
             banner = "\(project.isEmpty ? "" : project + ": ")\(message.isEmpty ? event : message)"
@@ -154,11 +156,33 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Add an event, honouring the bridge's streaming/replacement semantics:
+    /// `streaming` events grow one bubble, `replace` events swap the card that
+    /// was created earlier for the same request id.
+    private func append(_ event: TranscriptEvent, to sessionId: String) {
+        var list = transcripts[sessionId] ?? []
+
+        if event.replace == true, let requestId = event.requestId,
+           let idx = list.lastIndex(where: { $0.requestId == requestId && $0.kind == event.kind }) {
+            list[idx] = event
+        } else if event.streaming == true, let last = list.last, last.streaming == true, last.kind == event.kind {
+            list[list.count - 1] = event
+        } else {
+            list.append(event)
+        }
+
+        if list.count > 200 { list.removeFirst(list.count - 200) }
+        transcripts[sessionId] = list
+    }
+
     private func react(to event: TranscriptEvent, in sessionId: String) {
         switch event.kind {
         case "permission":
             Haptics.approvalNeeded()
             banner = "Approval needed: \(event.tool ?? "tool")"
+        case "question":
+            Haptics.approvalNeeded()
+            banner = "The agent has a question"
         case "result":
             Haptics.turnFinished(success: event.isError != true)
         case "error":
@@ -196,9 +220,20 @@ final class SessionStore: ObservableObject {
         Haptics.tap()
     }
 
-    func respond(allow: Bool, sessionId: String, requestId: String) {
-        client.send(.permissionResponse(sessionId: sessionId, requestId: requestId, allow: allow))
+    func respond(allow: Bool, sessionId: String, requestId: String, optionId: String? = nil) {
+        client.send(.permissionResponse(sessionId: sessionId, requestId: requestId, allow: allow, optionId: optionId))
         Haptics.turnFinished(success: allow)
+    }
+
+    /// Answer an AskUserQuestion prompt (choice label or free text).
+    func answer(_ text: String, sessionId: String, requestId: String) {
+        client.send(.answerInput(sessionId: sessionId, requestId: requestId, text: text, cancelled: false))
+        Haptics.tap()
+    }
+
+    func dismissQuestion(sessionId: String, requestId: String) {
+        client.send(.answerInput(sessionId: sessionId, requestId: requestId, text: nil, cancelled: true))
+        Haptics.tap()
     }
 
     func setMode(_ mode: String, sessionId: String) {
@@ -213,16 +248,29 @@ final class SessionStore: ObservableObject {
         transcripts[id] ?? []
     }
 
-    /// The oldest unanswered approval request in a session, if any.
+    /// The newest unanswered approval request in a session, if any.
     func pendingApproval(in sessionId: String) -> TranscriptEvent? {
+        guard let event = lastUnanswered(kind: "permission", in: sessionId) else { return nil }
+        // Cards produced only by the event stream (no actionable request) are
+        // informational; the bridge sets `historical` on those. Everything the
+        // watch can actually answer arrives without it.
+        return event
+    }
+
+    /// The newest unanswered AskUserQuestion in a session, if any.
+    func pendingQuestion(in sessionId: String) -> TranscriptEvent? {
+        lastUnanswered(kind: "question", in: sessionId)
+    }
+
+    private func lastUnanswered(kind: String, in sessionId: String) -> TranscriptEvent? {
         let events = transcripts[sessionId] ?? []
-        let requests = events.filter { $0.kind == "permission" }
-        guard let last = requests.last else { return nil }
-        // An approval is cleared by a later result/status event.
-        if let lastIndex = events.lastIndex(where: { $0.id == last.id }) {
-            let after = events.suffix(from: events.index(after: lastIndex))
-            if after.contains(where: { $0.kind == "result" || $0.kind == "error" }) { return nil }
-        }
+        guard let last = events.last(where: { $0.kind == kind && !($0.requestId ?? "").isEmpty }) else { return nil }
+        // Answered once a result/error arrives after it, or a status note says
+        // the permission/question was resolved.
+        guard let idx = events.lastIndex(where: { $0.id == last.id }) else { return nil }
+        let after = events[events.index(after: idx)...]
+        if after.contains(where: { $0.kind == "result" || $0.kind == "error" }) { return nil }
+        if after.contains(where: { $0.kind == "status" && ($0.note ?? "").hasPrefix("permission ") }) { return nil }
         return last
     }
 }

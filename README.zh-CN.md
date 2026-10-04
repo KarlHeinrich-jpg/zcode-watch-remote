@@ -19,8 +19,10 @@ watchOS App 和一个极简桥接服务组成，把本机的 [ZCode](https://z.a
 
 - **看到所有会话** —— 包括桌面 App 里的会话和你从手表新建的会话，实时状态
   (`idle` / `running` / `approval`) 一目了然。
-- **抬手批准** —— agent 要执行有风险的工具时，手表震动并弹出允许 / 拒绝按钮，
-  不用再猜它是不是卡在等你确认。
+- **抬手批准** —— agent 要执行有风险的工具时，手表震动，并显示 **ZCode 自己给出的
+  那几个选项**（"Allow once"、"Deny" 等），不用再猜它是不是卡在等你确认。
+- **回答 agent 的提问** —— AskUserQuestion 会带着选项出现在手表上，点一个选项，
+  或者用听写说出你自己的答案。
 - **语音输入指令** —— 直接用 watchOS 的听写和涂鸦功能发消息。
 - **随时打断** —— 在手腕上终止跑偏的任务。
 - **切换权限模式** —— 每个会话可切 `plan` / `build` / `edit` / `yolo`。
@@ -111,6 +113,8 @@ Token 在桥接配置文件的 `token` 字段里。注意：`127.0.0.1` 只在 h
 | `mode` | `build` | 从手表新建会话时使用的权限模式 |
 | `allowedProjects` | `[]` | 允许手表新建会话的项目目录。**留空则禁止从手表新建** —— 想启用 + 按钮就加上路径 |
 | `maxSessions` | `8` | 同时运行的会话数上限 |
+| `permissionFallback` | `deny` | 没人戴手表时 agent 请求授权的处理方式：`deny`（安全默认）、`allow`（无人值守运行）、`wait`（交给桌面 App 处理） |
+| `permissionTimeoutMs` | `300000` | 等待用户点击的时长，超时后套用上面的兜底策略 |
 | `debugEvents` | `false` | 把每个原始 ZCode 事件追加到 `events-debug.jsonl`(协议调试用) |
 
 命令行参数：`--port N`、`--config path`、`--reset-pin`、`--help`。
@@ -129,9 +133,9 @@ Token 在桥接配置文件的 `token` 字段里。注意：`127.0.0.1` 只在 h
 
 | 组件 | 状态 |
 |---|---|
-| 桥接服务 | ✅ 已完成，34/34 端到端断言通过(`cd bridge && node test/e2e.mjs`)，并已对真实 ZCode 安装验证(能列出真实会话、拉起真实 `app-server`) |
+| 桥接服务 | ✅ 已按**真实 ZCode 协议**实现(逆向出的真实事件信封与交互请求)，46/46 端到端断言通过(`cd bridge && node test/e2e.mjs`)，并已对真实 ZCode 安装验证(能列出真实会话、驱动真实 `app-server`) |
 | 手表 App | ⚠️ 源码完整(11 个 Swift 文件 + Xcode 工程 + 图标)，**尚未编译** —— 编写环境没有 macOS。首次编译预计需要修少量编译告警 |
-| 审批回传 | ⚠️ 已对协议 mock 做过端到端验证；真实审批载荷可能需要调整兜底策略(见 `HANDOFF.md`) |
+| 审批与提问 | ✅ 已对"讲真实协议"的 mock 做过完整回路验证(选项、决策、`modifiedInput.answers`、无手表时的兜底)。⚠️ 尚未在真实任务中观察过，详见 `HANDOFF.md` |
 
 ## 常见问题
 

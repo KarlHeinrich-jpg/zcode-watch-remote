@@ -48,29 +48,78 @@ struct SessionSummary: Identifiable, Equatable, Decodable {
     }
 }
 
+/// An option the agent's permission request offered (e.g. "Allow once").
+struct PermissionOption: Identifiable, Equatable, Decodable {
+    var id: String
+    var name: String
+    var description: String
+}
+
+/// One question from AskUserQuestion, with the choices the agent proposed.
+struct PendingQuestion: Equatable, Decodable {
+    var header: String
+    var question: String
+    var multiSelect: Bool
+    var options: [QuestionOption]
+
+    enum CodingKeys: String, CodingKey { case header, question, multiSelect, options }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        header = (try? c.decode(String.self, forKey: .header)) ?? ""
+        question = (try? c.decode(String.self, forKey: .question)) ?? ""
+        multiSelect = (try? c.decode(Bool.self, forKey: .multiSelect)) ?? false
+        options = (try? c.decode([QuestionOption].self, forKey: .options)) ?? []
+    }
+}
+
+struct QuestionOption: Equatable, Decodable {
+    var label: String
+    var description: String
+
+    enum CodingKeys: String, CodingKey { case label, description }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = (try? c.decode(String.self, forKey: .label)) ?? ""
+        description = (try? c.decode(String.self, forKey: .description)) ?? ""
+    }
+}
+
 /// One entry in a session transcript.
 struct TranscriptEvent: Identifiable, Equatable, Decodable {
     let id = UUID()
-    var kind: String        // text | tool | permission | status | result | error
+    var kind: String        // text | thinking | tool | permission | question | status | result | error
     var role: String?       // user | assistant
     var text: String?
     var tool: String?
-    var state: String?      // started | done
+    var state: String?      // started | done | failed
     var detail: String?
+    var summary: String?
     var status: String?
     var message: String?
+    var note: String?
     var requestId: String?
+    var callId: String?
+    var riskLevel: String?
     var isError: Bool?
+    var streaming: Bool?
+    var replace: Bool?
+    var options: [PermissionOption]?
+    var questions: [PendingQuestion]?
 
     enum CodingKeys: String, CodingKey {
-        case kind, role, text, tool, state, detail, status, message, requestId, isError
+        case kind, role, text, tool, state, detail, summary, status, message, note
+        case requestId, callId, riskLevel, isError, streaming, replace, options, questions
     }
 
     var symbol: String {
         switch kind {
         case "text": return role == "user" ? "person.fill" : "sparkle"
-        case "tool": return state == "done" ? "checkmark.circle" : "hammer"
+        case "thinking": return "brain"
+        case "tool": return state == "done" ? "checkmark.circle" : state == "failed" ? "xmark.circle" : "hammer"
         case "permission": return "hand.raised.fill"
+        case "question": return "questionmark.bubble.fill"
         case "result": return isError == true ? "exclamationmark.triangle" : "flag.checkered"
         case "error": return "exclamationmark.octagon"
         default: return "circle.dashed"
@@ -97,6 +146,7 @@ enum BridgeMessage {
     case sessionEvent(sessionId: String, event: TranscriptEvent)
     case promptAccepted(sessionId: String)
     case permissionAccepted(sessionId: String, requestId: String)
+    case inputAccepted(sessionId: String, requestId: String)
     case externalEvent(event: String, message: String, project: String)
     case pong
     case bridgeError(code: String, message: String)
@@ -160,6 +210,9 @@ enum BridgeMessage {
         case "permission-accepted":
             return .permissionAccepted(sessionId: obj["sessionId"] as? String ?? "",
                                        requestId: obj["requestId"] as? String ?? "")
+        case "input-accepted":
+            return .inputAccepted(sessionId: obj["sessionId"] as? String ?? "",
+                                  requestId: obj["requestId"] as? String ?? "")
         case "external-event":
             return .externalEvent(event: obj["event"] as? String ?? "notification",
                                   message: obj["message"] as? String ?? "",
@@ -185,7 +238,8 @@ enum OutgoingMessage {
     case sessionOpen(sessionId: String)
     case prompt(sessionId: String, text: String)
     case interrupt(sessionId: String)
-    case permissionResponse(sessionId: String, requestId: String, allow: Bool)
+    case permissionResponse(sessionId: String, requestId: String, allow: Bool, optionId: String?)
+    case answerInput(sessionId: String, requestId: String, text: String?, cancelled: Bool)
     case setMode(sessionId: String, mode: String)
     case ping
 
@@ -206,8 +260,13 @@ enum OutgoingMessage {
             dict = ["type": "prompt", "sessionId": id, "text": text]
         case .interrupt(let id):
             dict = ["type": "interrupt", "sessionId": id]
-        case .permissionResponse(let id, let requestId, let allow):
+        case .permissionResponse(let id, let requestId, let allow, let optionId):
             dict = ["type": "permission-response", "sessionId": id, "requestId": requestId, "allow": allow]
+            if let optionId { dict["optionId"] = optionId }
+        case .answerInput(let id, let requestId, let text, let cancelled):
+            dict = ["type": "answer-input", "sessionId": id, "requestId": requestId]
+            if let text { dict["text"] = text }
+            if cancelled { dict["cancelled"] = true }
         case .setMode(let id, let mode):
             dict = ["type": "set-mode", "sessionId": id, "mode": mode]
         case .ping:

@@ -34,7 +34,14 @@ if (resolved) {
 }
 
 const server = http.createServer(createHttpHandler({ cfg, hub, log, broadcastExternal: (p) => hub.externalEvent(p) }));
-const wsClients = new Set();
+/** conn -> { authed, device, badAttempts } */
+const wsClients = new Map();
+
+function authedCount() {
+  let n = 0;
+  for (const state of wsClients.values()) if (state.authed) n++;
+  return n;
+}
 
 server.on('upgrade', (req, socket) => {
   const url = new URL(req.url, 'http://localhost');
@@ -45,7 +52,7 @@ server.on('upgrade', (req, socket) => {
   const conn = acceptWebSocket(req, socket);
   if (!conn) return;
   const state = { authed: false, device: '', badAttempts: 0 };
-  wsClients.add(conn);
+  wsClients.set(conn, state);
   log.info(`watch connected (${wsClients.size} online)`);
 
   conn.onmessage = (text) => {
@@ -63,6 +70,7 @@ server.on('upgrade', (req, socket) => {
 
   conn.onclose = () => {
     wsClients.delete(conn);
+    hub.setWatchCount(authedCount());
     log.info(`watch disconnected (${wsClients.size} online)`);
   };
 });
@@ -75,7 +83,7 @@ function send(conn, obj) {
 
 function broadcast(obj) {
   const data = JSON.stringify(obj);
-  for (const c of wsClients) {
+  for (const c of wsClients.keys()) {
     try {
       c.send(data);
     } catch {}
@@ -98,6 +106,7 @@ async function handleWatchMessage(conn, state, msg) {
       }
       state.authed = true;
       state.device = String(msg.device || 'Apple Watch');
+      hub.setWatchCount(authedCount());
       log.info(`paired: ${state.device}`);
       send(conn, {
         type: 'paired',
@@ -119,6 +128,7 @@ async function handleWatchMessage(conn, state, msg) {
       }
       state.authed = true;
       state.device = String(msg.device || 'Apple Watch');
+      hub.setWatchCount(authedCount());
       log.info(`hello from ${state.device}`);
       send(conn, {
         type: 'welcome',
@@ -182,10 +192,27 @@ async function handleWatchMessage(conn, state, msg) {
     case 'permission-response': {
       const id = String(msg.sessionId || '');
       try {
-        await hub.respondApproval(id, String(msg.requestId || ''), !!msg.allow);
+        await hub.respondInteraction(id, String(msg.requestId || ''), {
+          allow: !!msg.allow,
+          optionId: msg.optionId ? String(msg.optionId) : undefined,
+        });
         send(conn, { type: 'permission-accepted', sessionId: id, requestId: msg.requestId });
       } catch (err) {
         send(conn, { type: 'error', error: 'approval-failed', sessionId: id, message: err.message });
+      }
+      return;
+    }
+
+    case 'answer-input': {
+      const id = String(msg.sessionId || '');
+      try {
+        await hub.respondInteraction(id, String(msg.requestId || ''), {
+          text: msg.text !== undefined ? String(msg.text) : undefined,
+          cancelled: !!msg.cancelled,
+        });
+        send(conn, { type: 'input-accepted', sessionId: id, requestId: msg.requestId });
+      } catch (err) {
+        send(conn, { type: 'error', error: 'answer-failed', sessionId: id, message: err.message });
       }
       return;
     }
@@ -224,7 +251,7 @@ hub.start();
 
 // Heartbeat: ping watches every 25s, drop after 2 missed pongs
 setInterval(() => {
-  for (const c of [...wsClients]) {
+  for (const c of [...wsClients.keys()]) {
     if (!c.alive) continue;
     if (c.missedPongs >= 2) {
       c.close(4000);
@@ -239,7 +266,7 @@ setInterval(() => {
 function shutdown() {
   log.info('shutting down...');
   hub.stop();
-  for (const c of wsClients) c.close(1001);
+  for (const c of wsClients.keys()) c.close(1001);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();
 }

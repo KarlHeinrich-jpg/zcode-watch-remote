@@ -106,14 +106,19 @@ export class ZcodeClient extends EventEmitter {
     }
   }
 
+  /**
+   * Server -> client requests. Runtime preferences are answered inline; the
+   * interaction requests (tool approval, AskUserQuestion, plan approval) are
+   * forwarded to the hub so a human on the watch can decide. Anything else is
+   * acked with an empty result so the server never stalls.
+   */
   _answerServerRequest(msg) {
-    const reply = (result) => {
-      try {
-        this.child.stdin.write(JSON.stringify({ id: msg.id, result }) + '\n');
-      } catch {}
-    };
+    if (msg.method === 'interaction/requestPermission' || msg.method === 'interaction/requestUserInput') {
+      this.emit('serverRequest', msg);
+      return;
+    }
     if (msg.method === 'session/requestRuntimePreferences') {
-      reply({
+      this.respond(msg.id, {
         nativeSearchEnhancementsEnabled: false,
         memoryEnabled: false,
         askUserQuestionAutoResolutionEnabled: true,
@@ -122,7 +127,16 @@ export class ZcodeClient extends EventEmitter {
       return;
     }
     this.log.debug(`auto-acking server request: ${msg.method}`);
-    reply({});
+    this.respond(msg.id, {});
+  }
+
+  /** Reply to a server -> client request by its id. */
+  respond(id, result) {
+    try {
+      this.child.stdin.write(JSON.stringify({ id, result }) + '\n');
+    } catch (err) {
+      this.log.warn(`cannot answer server request ${id}: ${err.message}`);
+    }
   }
 
   request(method, params = {}, timeoutMs = 30000) {

@@ -8,10 +8,14 @@ struct EventRowView: View {
         switch event.kind {
         case "text":
             textRow
+        case "thinking":
+            thinkingRow
         case "tool":
             toolRow
         case "permission":
             permissionRow
+        case "question":
+            questionRow
         case "result":
             resultRow
         case "error":
@@ -20,6 +24,29 @@ struct EventRowView: View {
             statusRow
         default:
             EmptyView()
+        }
+    }
+
+    private var thinkingRow: some View {
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: "brain")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            Text(event.text ?? "")
+                .font(.system(size: 11).italic())
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+        }
+    }
+
+    private var questionRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "questionmark.bubble").font(.system(size: 10)).foregroundStyle(.blue)
+            Text(event.prompt?.isEmpty == false ? (event.prompt ?? "") : "The agent asked a question")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.blue)
+                .lineLimit(2)
         }
     }
 
