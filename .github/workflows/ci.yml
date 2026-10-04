@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bridge:
+    name: Bridge (Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ["18", "22"]
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Dependency check (the bridge must stay dependency-free)
+        shell: bash
+        working-directory: .
+        run: |
+          if node -e "const p=require('./bridge/package.json'); process.exit(Object.keys(p.dependencies||{}).length?1:0)"; then
+            echo "no runtime dependencies ✓"
+          else
+            echo "::error::bridge/package.json must not declare dependencies"; exit 1
+          fi
+      - name: End-to-end tests
+        run: node test/e2e.mjs
+
+  project-files:
+    name: Project file checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Xcode project structure
+        run: node tools/check-pbxproj.mjs
+      - name: Swift source sanity
+        run: node tools/check-swift.mjs
+      - name: App icon is up to date
+        run: |
+          node tools/generate-icon.mjs
+          git diff --exit-code -- watch/ZCodeRemote/Assets.xcassets || {
+            echo "::error::the committed app icon does not match tools/generate-icon.mjs"; exit 1; }
+
+  watchos-build:
+    name: Build watchOS app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Build for watchOS
+        run: |
+          xcodebuild build \
+            -project watch/ZCodeRemote.xcodeproj \
+            -scheme ZCodeRemote \
+            -destination 'generic/platform=watchOS' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tail -40

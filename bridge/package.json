@@ -1,0 +1,25 @@
+{
+  "name": "zcode-watch-remote-bridge",
+  "version": "0.1.0",
+  "description": "Zero-dependency bridge that lets an Apple Watch control ZCode agent sessions over the local network",
+  "type": "module",
+  "bin": {
+    "zcode-watch-bridge": "src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/e2e.mjs"
+  },
+  "keywords": [
+    "zcode",
+    "apple-watch",
+    "watchos",
+    "remote",
+    "agent",
+    "websocket"
+  ],
+  "license": "MIT"
+}
