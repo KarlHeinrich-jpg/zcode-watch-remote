@@ -1,0 +1,16 @@
+# Normalize line endings: source files must stay LF so macOS/Xcode and CI
+# behave identically to the machine that wrote them.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+
+# Windows-only scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Xcode project files are diffed often — mark them for review
+*.pbxproj text eol=lf
+*.xcscheme text eol=lf
