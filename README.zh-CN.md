@@ -37,7 +37,7 @@ watchOS App 和一个极简桥接服务组成，把本机的 [ZCode](https://z.a
 需要 Node.js 18+。**零依赖，不需要 install**
 
 ```bash
-git clone https://github.com/<you>/zcode-watch-remote.git
+git clone https://github.com/KarlHeinrich-jpg/zcode-watch-remote.git
 cd zcode-watch-remote/bridge
 node src/index.js
 ```

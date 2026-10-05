@@ -39,7 +39,7 @@ back to your desk.
 Needs Node.js 18+. **No dependencies, no install step**
 
 ```bash
-git clone https://github.com/<you>/zcode-watch-remote.git
+git clone https://github.com/KarlHeinrich-jpg/zcode-watch-remote.git
 cd zcode-watch-remote/bridge
 node src/index.js
 ```
