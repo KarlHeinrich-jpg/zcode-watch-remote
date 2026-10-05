@@ -140,7 +140,7 @@ Flags: `--port N`, `--config path`, `--reset-pin`, `--help`.
 | Component | State |
 |---|---|
 | Bridge | ✅ Implemented against the **real** ZCode protocol (reverse-engineered event envelope, interaction requests), 46/46 end-to-end tests pass (`cd bridge && node test/e2e.mjs`), verified against a real ZCode install (lists real sessions, drives the real `app-server`) |
-| Watch app | ⚠️ Source complete (11 Swift files, Xcode project, icon), **not yet compiled** — no macOS in the environment where it was written. Expect to fix a small number of compiler nits on first build. |
+| Watch app | ✅ Source complete and **compiles clean** — GitHub CI runs `xcodebuild` against `generic/platform=watchOS` on every push (arm64 + arm64_32, zero warnings). ⚠️ Not yet run on a watch or simulator, so the UI itself is unproven. |
 | Approvals & questions | ✅ Round-trip verified against a mock that speaks the real protocol (options, decisions, `modifiedInput.answers`, and the no-watch fallback). ⚠️ Not yet observed on a live turn — see `HANDOFF.md` |
 
 ## Troubleshooting

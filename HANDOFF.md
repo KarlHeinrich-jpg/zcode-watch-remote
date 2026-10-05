@@ -1,7 +1,7 @@
 # HANDOFF — ZCode Remote for Apple Watch
 
 > Status snapshot for whoever picks this up next (human or agent).
-> Last updated: 2026-10-04 (session 2 — rewritten against the real protocol).
+> Last updated: 2026-10-05 (session 3 — pushed to GitHub, watch app compiles on CI).
 
 ## What this project is
 
@@ -106,9 +106,13 @@ from the CLI.
 
 ## Still unverified — the next person's first job
 
-1. **Compile the watch app.** Still never seen a Swift compiler (no macOS here).
-   The CI `watchos-build` job runs `xcodebuild` for you:
-   `xcodebuild build -project watch/ZCodeRemote.xcodeproj -scheme ZCodeRemote -destination 'generic/platform=watchOS' CODE_SIGNING_ALLOWED=NO`
+1. ~~Compile the watch app.~~ **Done** — closing this is what CI is for. The first
+   macOS run reported a fake green (the workflow piped `xcodebuild` into `tail`,
+   which returns tail's status); after adding `set -o pipefail` it surfaced one
+   real error (`TranscriptEvent` was missing the `prompt` field used by the
+   question card). With that fixed, the build succeeds on the macOS runner.
+   Remaining: **run it** on a simulator or a real watch — nobody has seen the UI
+   yet, so layout, dictation and the websocket path are untested on device.
 2. **One live turn with `debugEvents: true`.** The sandbox has no network, so no
    real model turn has ever run through the bridge. Shapes are now taken from the
    real protocol, but confirm on hardware: `part.upserted` ordering, whether
