@@ -99,6 +99,7 @@ struct TranscriptEvent: Identifiable, Equatable, Decodable {
     var status: String?
     var message: String?
     var note: String?
+    var prompt: String?
     var requestId: String?
     var callId: String?
     var riskLevel: String?
@@ -109,7 +110,7 @@ struct TranscriptEvent: Identifiable, Equatable, Decodable {
     var questions: [PendingQuestion]?
 
     enum CodingKeys: String, CodingKey {
-        case kind, role, text, tool, state, detail, summary, status, message, note
+        case kind, role, text, tool, state, detail, summary, status, message, note, prompt
         case requestId, callId, riskLevel, isError, streaming, replace, options, questions
     }
 

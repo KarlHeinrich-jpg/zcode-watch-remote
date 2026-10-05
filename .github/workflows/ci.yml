@@ -61,7 +61,10 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
       - name: Build for watchOS
+        # `set -o pipefail` matters: a plain `xcodebuild ... | tail` returns
+        # tail's exit status, so a failed build would look green.
         run: |
+          set -o pipefail
           xcodebuild build \
             -project watch/ZCodeRemote.xcodeproj \
             -scheme ZCodeRemote \
@@ -70,4 +73,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            | tail -40
+            2>&1 | tee /tmp/xcodebuild.log
+      - name: Summarise build diagnostics
+        if: always()
+        run: |
+          echo "### watchOS build diagnostics" >> $GITHUB_STEP_SUMMARY
+          grep -E "error:|warning:" /tmp/xcodebuild.log | sort -u | head -50 >> $GITHUB_STEP_SUMMARY || echo "(none)" >> $GITHUB_STEP_SUMMARY
